@@ -9,11 +9,10 @@ jobs:
     timeout-minutes: 350
 
     steps:
-
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install XFCE + noVNC
+      - name: Install XFCE and noVNC
         run: |
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -46,7 +45,9 @@ jobs:
 
           sudo chmod +x /home/desktop/.vnc/xstartup
 
-          sudo -u desktop bash -c 'echo "Desktop@2026" | vncpasswd -f > /home/desktop/.vnc/passwd'
+          sudo -u desktop bash -c \
+            'echo "Desktop@2026" | vncpasswd -f > /home/desktop/.vnc/passwd'
+
           sudo chmod 600 /home/desktop/.vnc/passwd
           sudo chown -R desktop:desktop /home/desktop/.vnc
 
@@ -63,6 +64,10 @@ jobs:
             --web=/usr/share/novnc \
             127.0.0.1:6080 \
             127.0.0.1:5901 > /tmp/novnc.log 2>&1 &
+
+          sleep 3
+
+          curl -I http://127.0.0.1:6080/ || true
 
       - name: Install cloudflared
         run: |
@@ -82,11 +87,12 @@ jobs:
           CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
         run: |
           sudo cloudflared tunnel run \
-            --token "$CLOUDFLARE_TUNNEL_TOKEN" > /tmp/cloudflared.log 2>&1 &
+            --token "$CLOUDFLARE_TUNNEL_TOKEN" \
+            > /tmp/cloudflared.log 2>&1 &
 
           sleep 10
 
-          echo "===== CLOUDFLARE ====="
+          echo "===== CLOUDFLARE TUNNEL ====="
           cat /tmp/cloudflared.log
 
       - name: Keep Desktop Alive
