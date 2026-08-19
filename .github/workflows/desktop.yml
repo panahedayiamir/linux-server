@@ -1,0 +1,97 @@
+name: Linux Desktop
+
+on:
+  workflow_dispatch:
+
+jobs:
+  desktop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install XFCE + noVNC
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            xfce4 \
+            xfce4-goodies \
+            xfce4-terminal \
+            dbus-x11 \
+            tigervnc-standalone-server \
+            novnc \
+            websockify \
+            curl
+
+      - name: Create Desktop User
+        run: |
+          sudo useradd -m -s /bin/bash desktop || true
+          echo "desktop:Desktop@2026" | sudo chpasswd
+          sudo usermod -aG sudo desktop
+          echo "desktop ALL=(ALL) NOPASSWD:ALL" | sudo tee /etc/sudoers.d/desktop
+
+      - name: Configure XFCE
+        run: |
+          sudo -u desktop mkdir -p /home/desktop/.vnc
+
+          sudo -u desktop bash -c 'cat > /home/desktop/.vnc/xstartup << "EOF"
+          #!/bin/sh
+          unset SESSION_MANAGER
+          unset DBUS_SESSION_BUS_ADDRESS
+          exec dbus-launch --exit-with-session startxfce4
+          EOF'
+
+          sudo chmod +x /home/desktop/.vnc/xstartup
+
+          sudo -u desktop bash -c 'echo "Desktop@2026" | vncpasswd -f > /home/desktop/.vnc/passwd'
+          sudo chmod 600 /home/desktop/.vnc/passwd
+          sudo chown -R desktop:desktop /home/desktop/.vnc
+
+      - name: Start VNC
+        run: |
+          sudo -u desktop vncserver :1 \
+            -geometry 1280x800 \
+            -depth 24 \
+            -localhost
+
+      - name: Start noVNC
+        run: |
+          sudo websockify \
+            --web=/usr/share/novnc \
+            127.0.0.1:6080 \
+            127.0.0.1:5901 > /tmp/novnc.log 2>&1 &
+
+      - name: Install cloudflared
+        run: |
+          sudo mkdir -p --mode=0755 /usr/share/keyrings
+
+          curl -fsSL https://pkg.cloudflare.com/cloudflare-public-v2.gpg \
+            | sudo tee /usr/share/keyrings/cloudflare-public-v2.gpg >/dev/null
+
+          echo 'deb [signed-by=/usr/share/keyrings/cloudflare-public-v2.gpg] https://pkg.cloudflare.com/cloudflared any main' \
+            | sudo tee /etc/apt/sources.list.d/cloudflared.list
+
+          sudo apt-get update
+          sudo apt-get install -y cloudflared
+
+      - name: Start Cloudflare Tunnel
+        env:
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+        run: |
+          sudo cloudflared tunnel run \
+            --token "$CLOUDFLARE_TUNNEL_TOKEN" > /tmp/cloudflared.log 2>&1 &
+
+          sleep 10
+
+          echo "===== CLOUDFLARE ====="
+          cat /tmp/cloudflared.log
+
+      - name: Keep Desktop Alive
+        run: |
+          for i in {1..340}; do
+            echo "Desktop active: $i/340 minutes"
+            sleep 60
+          done
